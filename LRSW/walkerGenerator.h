@@ -44,6 +44,7 @@ public:
     JtotFN = JtotFilename();
     std::ofstream Jtotfile;
     Jtotfile.open(JtotFN.c_str());
+    Jtotfile.precision(16);
     Jtotfile << Jtot << std::endl;
     alps::OXDRFileDump odump(walkerFN);
     walkerChoice.save(odump);
@@ -125,7 +126,7 @@ private:
             J = ewaldsum.ewaldsum(origin,ci);
           }
           else if(interaction == "meanfield"){
-            J = 1.0/(N-1);
+            J = 1.0/N;
           }
           else if(interaction == "nearest"){
             if(Lattice->discriminateNearest(j,i)){ J = 1; }

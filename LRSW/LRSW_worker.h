@@ -34,7 +34,7 @@ public:
     binarywalkerfile = params.value_or_default("BINARYWALKERFILE", "on");
     swapconfiguration = params.value_or_default("SWAPCONFIGURATION", "on");
     interaction = params.value_or_default("INTERACTION", "LRI");
-    normalization = params.value_or_default("NORMALIZATION", "off");
+    normalization = params.value_or_default("NORMALIZATION", "off"); //usage of normalization is not recommended since it deviate temperature at small N.
     latticename = params.value_or_default("LATTICE", "square lattice");
     a = params.value_or_default("a", 1.0);
     L = params.value_or_default("L", 64);
@@ -61,6 +61,12 @@ public:
 /*    if(genwalkermode=="on"){
       makeAllSquareWalkerTable(absolutePATH);
     }*/
+
+    if(interaction=="meanfield"&&normalization=="on"){
+      std::cout << "It has error because of weird definition of MF hamiltonian" <<std::endl;
+      std::exit(1);
+    }
+
 
     if(interaction=="nearest" && dim<5){
       std::cout << "This program is worked by SW" << std::endl;
