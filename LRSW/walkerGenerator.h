@@ -125,10 +125,10 @@ private:
           if(interaction == "LRI"){
             J = ewaldsum.ewaldsum(origin,ci);
           }
-          else if(interaction == "meanfield"){
+          else if(interaction == "MF"){
             J = 1.0/N;
           }
-          else if(interaction == "nearest"){
+          else if(interaction == "SR"){
             if(Lattice->discriminateNearest(j,i)){ J = 1; }
             else{ J =0; }
           }
@@ -137,7 +137,7 @@ private:
             J = 0;
           }
           Jtot += J;
-          bondprob[i+N*j] = 2.0*J;
+          bondprob[i+N*j] = J;
           if(i==N-1){
             std::cout << i <<"/"<< N <<"  "<< origin[0] <<"  "<< origin[1] <<"  "<< ci[0] <<"  "<< ci[1] <<"  "<< J << std::endl;
           }

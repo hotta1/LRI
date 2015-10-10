@@ -11,24 +11,27 @@ public:
   std::vector<int> numNearest;
 
   int num_sites(){ return N; }
-  int num_nearest(int i){ return numNearest[i]; }
+  int num_nearest(int i){ 
+    i%=numVert;
+    return numNearest[i]; 
+  }
 
   virtual std::vector<double> coordinate(int n)=0;
 
-  void shiftAbs(int abs_n1, int abs_n2, int& n1, int& n2){
+  void shiftAbs(int& n1, int& n2){ //translate n2 to n2+n1
     std::vector<int> n1_coord, n2_coord;
     n1_coord.resize(dim+1); //+1(for 3d system, n_coord[3]) are number of site in the unit cell.
     n2_coord.resize(dim+1); //for 3d system, n = n_coord[0]*cell_axes[1]*cell_axes[2]*numVert + n_coord[1]*cell_axes[2]*numVert + n_coord[2]*numVert + n_coord[3] 
 
-    n1_coord = vectorRepresentation(abs_n1);
-    n2_coord = vectorRepresentation(abs_n2);
+    n1_coord = vectorRepresentation(n1);
+    n2_coord = vectorRepresentation(n2);
 
     for(int i=0 ; i<dim ; i++){
-      n1_coord[i] += n2_coord[i];
-      n1_coord[i] %= cellSize[i];
+      n2_coord[i] += n1_coord[i];
+      n2_coord[i] %= cellSize[i];
     }
 
-    n1 = siteRepresentation(n1_coord);
+    // n1 == siteRepresentation(n1_coord);
     n2 = siteRepresentation(n2_coord);
     return;
   }
@@ -47,7 +50,7 @@ public:
     return nout;
   }
 
-  virtual int nearestSite(int n, int x)=0;//x is xth nearest site. it has no double count.
+  virtual int nearestSite(int n, int x)=0;//x is xth nearest site. it has double count.
 
   virtual bool discriminateNearest(int n1, int n2)=0;//it has double cout.
 
@@ -80,14 +83,6 @@ protected:
     }
     return n_coord;
   }
-
-/*  inline std::vector<int> makeVector(int x, int y, int vert){
-    std::vector<int> tmp(3);
-    tmp[0] = x;
-    tmp[1] = y;
-    tmp[2] = vert;
-    return tmp;
-  }*/
 };
 
 
@@ -100,11 +95,11 @@ public:
     latticename = "square";
     cellSize.resize(dim,cellSize_);
     numVert = 1;
-    numNearest.resize(numVert,dim);
+    numNearest.resize(numVert,2*dim);
     cellSize.push_back(numVert);//last element of cellSize is numVert
     latticeConstant.resize(dim,1.0);
     latticeLength.resize(dim);
-    numCell=1;
+    numCell=1; //numCell = N/numVert
     for(int i=0 ; i<dim ; i++){
       latticeLength[i] = latticeConstant[i]*cellSize[i];
       numCell *= cellSize[i];
@@ -120,7 +115,7 @@ public:
     cellSize.push_back(numVert);//last element of cellSize is numVert
     latticeConstant = latticeConstant_;
     latticeLength.resize(dim);
-    numCell=1;
+    numCell=1; //numCell = N/numVert
     for(int i=0 ; i<dim ; i++){
       latticeLength[i] = latticeConstant[i]*cellSize[i];
       numCell *= cellSize[i];
@@ -141,10 +136,13 @@ public:
     return nout;
   }
 
-  virtual int nearestSite(int n, int x){//x is xth nearest site. it has no double count.
+  virtual int nearestSite(int n, int x){//x is xth nearest site. it has double count.
     std::vector<int> nearest;
     nearest.resize(dim+1,0);
-    nearest[x] = 1;
+    if( (x<0) || (x>=2*dim) ){ std::cout << "second argument of nearestSite(n,x) must be 0<=x<2*dim"<< std::endl; exit(0); }
+    if(x<dim){ nearest[x] = 1; }
+    else{      nearest[x%dim] = -1; }
+
     return shiftCoordinate(n, nearest);
   }
 
@@ -178,13 +176,13 @@ class triangularLattice : public simpleLattice{
     cellSize[0]=cellSize_;
     cellSize[1]=cellSize_/2;
     numVert = 2;
-    numNearest.resize(numVert,3);
+    numNearest.resize(numVert,6);
     cellSize.push_back(numVert);
     latticeConstant.resize(dim);
     latticeConstant[0]=1.0;
     latticeConstant[1]=sqrt(3.0);
     latticeLength.resize(dim);
-    numCell=1;
+    numCell=1; //numCell = N/numVert
     for(int i=0 ; i<dim ; i++){
       latticeLength[i] = latticeConstant[i]*cellSize[i];
       numCell *= cellSize[i];
@@ -201,7 +199,7 @@ class triangularLattice : public simpleLattice{
     cellSize.push_back(numVert);
     latticeConstant = latticeConstant_;
     latticeLength.resize(dim);
-    numCell=1;
+    numCell=1; //numCell = N/numVert
     for(int i=0 ; i<dim ; i++){
       latticeLength[i] = latticeConstant[i]*cellSize[i];
       numCell *= cellSize[i];
@@ -225,7 +223,7 @@ class triangularLattice : public simpleLattice{
     return nout;
   }
 
-  virtual int nearestSite(int n, int x){//x is xth nearest site(from 0 to num_nearest-1). it has no double count.
+  virtual int nearestSite(int n, int x){//x is xth nearest site(from 0 to num_nearest-1). it has double count.
     std::vector<int> n_coord;
     n_coord = vectorRepresentation(n);
     std::vector<int> nearest;
@@ -238,6 +236,15 @@ class triangularLattice : public simpleLattice{
         nearest = boost::assign::list_of(1)(0)(0);
       }
       else if(x==2){
+        nearest = boost::assign::list_of(0)(-1)(1);
+      }
+      else if(x==3){
+        nearest = boost::assign::list_of(-1)(-1)(1);
+      }
+      else if(x==4){
+        nearest = boost::assign::list_of(-1)(0)(0);
+      }
+      else if(x==5){
         nearest = boost::assign::list_of(-1)(0)(1);
       }
       else{
@@ -252,6 +259,15 @@ class triangularLattice : public simpleLattice{
         nearest = boost::assign::list_of(1)(0)(1);
       }
       else if(x==2){
+        nearest = boost::assign::list_of(1)(0)(0);
+      }
+      else if(x==3){
+        nearest = boost::assign::list_of(0)(0)(0);
+      }
+      else if(x==4){
+        nearest = boost::assign::list_of(-1)(0)(1);
+      }
+      else if(x==5){
         nearest = boost::assign::list_of(0)(1)(0);
       }
       else{

@@ -4,7 +4,7 @@ ALGORITHM = "LRSW"
 ABSOLUTEPATH = "/home/k0010/k001007/LRI/LRSW/"
 SWAPCONFIGURATION = "on"
 BINARYWALKERFILE = "off"
-NORMALIZATION = "on"
+NORMALIZATION = "off"
 ''')
 f.write('SWEEPS = ')
 f.write(str(2**10))
@@ -12,9 +12,11 @@ f.write('\nNUM_CLONES = ')
 f.write(str(2**2))
 f.write('''
 
-INTERACTION = "LRI" // "LRI""nearest""meanfield"
+INTERACTION = "LRI" // "LRI""SR""MF"
 LATTICE = "square_lattice" // "square_lattice""triangular_lattice"
 sigma = 1.0
+epsilon = 1.0
+method = "metropolis" // "metropolis""FTloc""SW""FTclu"
 ''')
 f.write('dimension = ')
 dim = 2
