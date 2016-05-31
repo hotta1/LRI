@@ -132,6 +132,9 @@ private:
             if(Lattice->discriminateNearest(j,i)){ J = 1; }
             else{ J =0; }
           }
+          else if(interaction == "free"){
+            J = 0;
+          }
           else{
             std::cout <<  "Interaction name \"" << interaction << "\" does not exist." << std::endl;
             J = 0;

@@ -1,3 +1,5 @@
+#include <boost/assign/list_of.hpp> //for boost::assign::list_of(x)(y)
+
 class simpleLattice{
 public:
   simpleLattice(){}
@@ -31,7 +33,25 @@ public:
       n2_coord[i] %= cellSize[i];
     }
 
-    // n1 == siteRepresentation(n1_coord);
+    // n1 = siteRepresentation(n1_coord);
+    n2 = siteRepresentation(n2_coord);
+    return;
+  }
+
+  void shiftRel(int& n1, int& n2){ //translate n2 to n2-n1 and translate n1 to the coordinate of a unit cell(translate n1 to n1[dim+1]).
+    std::vector<int> n1_coord, n2_coord;
+    n1_coord.resize(dim+1); //+1(for 3d system, n_coord[3]) are number of site in the unit cell.
+    n2_coord.resize(dim+1); //for 3d system, n = n_coord[0]*cell_axes[1]*cell_axes[2]*numVert + n_coord[1]*cell_axes[2]*numVert + n_coord[2]*numVert + n_coord[3] 
+
+    n1_coord = vectorRepresentation(n1);
+    n2_coord = vectorRepresentation(n2);
+
+    for(int i=0 ; i<dim ; i++){
+      n2_coord[i] += cellSize[i];// to avoid negative vertex number.
+      n2_coord[i] -= n1_coord[i];
+      n2_coord[i] %= cellSize[i];
+    }
+    n1 = n1_coord[dim-1 + 1];// the coordinate of a unit cell.
     n2 = siteRepresentation(n2_coord);
     return;
   }

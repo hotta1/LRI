@@ -8,6 +8,8 @@
 #include <boost/assign/list_of.hpp> //for boost::assign::list_of(x)(y)
 #include "simpleLattice.h"//libraries must be included above header files.
 #include "walkerGenerator.h"
+#include "correlatedDistribution.h"
+#include "correlationMatrixGenerator.h"
 //#include <omp.h>
 
 //class LRSW_worker : public alps::parapack::lattice_mc_worker<> {
@@ -30,16 +32,21 @@ public:
     std::string binarywalkerfile;
     binarywalkerfile = params.value_or_default("BINARYWALKERFILE", "on");
     swapconfiguration = params.value_or_default("SWAPCONFIGURATION", "on");
-    interaction = params.value_or_default("INTERACTION", "LRI"); //"MF" "SR" "LRI"
+    interaction = params.value_or_default("INTERACTION", "SR"); //"MF" "SR" "LRI" "free"
     method = params.value_or_default("METHOD", "metropolis");// "FTclu" "FTloc" "SW" "metropolis"
     normalization = params.value_or_default("NORMALIZATION", "off"); //usage of normalization is not recommended since it deviate temperature at small N.
     latticename = params.value_or_default("LATTICE", "square lattice");
     a = params.value_or_default("a", 1.0);
     L = params.value_or_default("L", 64);
-    dim = params.value_or_default("dimension", 2);
-    sigma = params.value_or_default("sigma", 1.0);
-    epsilon = params.value_or_default("epsilon", 0.0);
+    dim = params.value_or_default("DIMENSION", 2);
+    sigma = params.value_or_default("SIGMA", 1.0);
     sigma += static_cast<double>(dim);
+    epsilon = params.value_or_default("EPSILON", 0.0);
+    fieldintensity = params.value_or_default("FIELDINTENSITY", 0.0); // In the case using cluster method, external field is ighored.
+    randomfield = params.value_or_default("RANDOMFIELD", "off");
+    rfstddev = params.value_or_default("RFSTDDEV", 1.0);
+    rho =  params.value_or_default("RHO", 1.0);
+    rho = static_cast<double>(dim) - rho;
     if(latticename=="square lattice" || latticename=="square_lattice"){ Lattice = new squareLattice(L, dim); }
     else if(latticename == "triangular lattice" || latticename=="triangular_lattice"){ Lattice = new triangularLattice(L); }
     else{ std::cout << "Aveilable latticename is square_lattice or triangular_lattice" << std::endl; std::exit(1); }
@@ -47,6 +54,18 @@ public:
     numCell = Lattice->numCell;
     N = Lattice->num_sites();
     spin.resize(N, 1); // spin configuration
+    if(randomfield=="on"){
+      std::vector<std::vector<double> > corMatrix;
+      correlationMatrixGenerator matGen(Lattice);
+      corMatrix = matGen.algebra(rho);
+      boost::normal_distribution<double> dist(fieldintensity, rfstddev);
+      corDistEigen<boost::normal_distribution<double> > corDist(corMatrix, dist);
+      extField = corDist.generate(generator_01());
+      //extField = corDist.genind(generator_01());
+    }// coming soon...
+    else{
+      extField.resize(N,fieldintensity);
+    }
     sz = N;
     if( N <= 128 ){histogramPartition = 2.0/static_cast<double>(N);}
     else{          histogramPartition = 2.0/static_cast<double>(128);}
@@ -57,15 +76,15 @@ public:
     if(method!="FTloc"){ epsilon = 0.0; }
     if(method=="SW"){
       std::cout << "This program is worked by SW" << std::endl;
-      Jtot = 0;
+      Jtot = 0.0;
       for(int i=0 ; i<numVert ; i++){ Jtot += Lattice->num_nearest(i)*numCell;}
-      Jtot/=2;
+      Jtot/=2.0;
     }
     else if(method=="metropolis"){
       std::cout << "This program is worked by metropolis" << std::endl;
-      Jtot = 0;
+      Jtot = 0.0;
       for(int i=0 ; i<numVert ; i++){ Jtot += Lattice->num_nearest(i)*numCell;}
-      Jtot/=2;
+      Jtot/=2.0;
     }
     else if(method=="FTclu"||method=="FTloc"){
       std::cout << "This program is worked by FT" << std::endl;
@@ -92,8 +111,8 @@ public:
         Jtotfile.close();
         walkerfile.open(walkerFN.c_str());
         Jtotfile.open(JtotFN.c_str());
-        alps::IXDRFileDump idmup(walkerFN);
-        walkerChoice.load(idmup);
+        alps::IXDRFileDump idump(walkerFN);
+        walkerChoice.load(idump);
         Jtotfile >> Jtot;
       }
       else{
@@ -101,7 +120,7 @@ public:
       }
       if(normalization == "on"){
         std::cout << "Warning: Temperature normalization is not reccomended.(Because of weird definition of MF hamiltonian and a lack of self-interaction)" <<std::endl;
-        lambdatot = (2+epsilon)*N/(2*T);
+        lambdatot = (2.0+epsilon)*N/(2.0*T);
       }
       else{
         lambdatot = (2.0+epsilon)*Jtot/T;
@@ -112,6 +131,13 @@ public:
       std::cout << "Aveilable method is SW, metropolis, FTclu, or FTloc." <<std::endl;
       std::exit(1);
     }
+    if(interaction=="free"){ Jtot = 0.0; }
+    if(method=="FTloc"||method=="metropolis"){// Influence from an external field must be taken into account to calculate energy by inproved estimator.
+      for(int i=0 ; i<N ; ++i){ 
+        Jtot += fabs(extField[i]);
+      }
+    }
+    std::cout <<"Jtot="<<Jtot<<std::endl;
   }
 
   virtual ~LRSW_worker() {delete Lattice;}
@@ -169,13 +195,16 @@ public:
     if(method=="metropolis"){
       for(int i=0 ; i<N ; i++){
         int n1;
-        n1 = i; //sequential
-        //n1 = (int)(N*random_01()); //at random
+        //n1 = i; //sequential
+        n1 = (int)(N*random_01()); //at random
         double egap = 0;
-        for(int j=0 ; j < Lattice->num_nearest(n1) ; j++){
-          int n2 = Lattice->nearestSite(n1,j);
-          egap -= spin[n1]*spin[n2];
+        if(interaction!="free"){
+          for(int j=0 ; j < Lattice->num_nearest(n1) ; j++){
+            int n2 = Lattice->nearestSite(n1,j);
+            egap -= spin[n1]*spin[n2];
+          }
         }
+        egap -= spin[n1]*extField[n1];
         if( random_01() < std::exp(2.0*egap/T)){
           spin[n1]*=-1;
         }
@@ -186,14 +215,13 @@ public:
       //make connections
       ktot = 0;
       int Ktot = pois(generator_01());
-      int i=0;
       std::vector<std::vector<int> > connection;
       connection.resize(N);
       for(int i=0 ; i < Ktot ; i++){
         int X, n1, n2;
         X = walkerChoice(engine());// X = N*n1_coord[vert] + n2
         n2 = X%N;
-        n1 = (int)(numCell*random_01())*numVert; // decide a root cell(not a vertex)
+        n1 = (int)(numCell*random_01())*numVert; // decide a root cell(not a root vertex)
         Lattice->shiftAbs(n1 ,n2);
         n1 += X/N; // n1 is n1 + n1_coord[vert]
         if((spin[n1]==spin[n2])||(random_01()<epsilon/(2+epsilon))){
@@ -201,6 +229,13 @@ public:
           connection[n1].push_back(n2);
           ktot++;
         }
+      }
+      std::vector<int> connectionExt(N,0);
+      for(int i=0 ; i < N ; i++){
+   //     boost::poisson_distribution<> poisExt((2+epsilon)*fabs(extField[i])/T);
+        boost::poisson_distribution<> poisExt((1+epsilon+spin[i]*extField[i]/fabs(extField[i]))*fabs(extField[i])/T);
+        connectionExt[i] = poisExt(generator_01());
+        ktot += connectionExt[i];
       }
       //flip spins
       for(int i=0 ; i<N ; ++i){
@@ -210,6 +245,12 @@ public:
           if(spin[n]==spin[connection[n][j]]){ R *= epsilon/(2.0+epsilon); }
           else{                                R *= (2.0+epsilon)/epsilon; }
           //R *= (1.0 - spin[n]*spin[connection[n][j]] + epsilon)/(1.0 + spin[n]*spin[connection[n][j]] + epsilon);
+        }
+        for(int j=0 ; j < connectionExt[n] ; j++){
+          if(spin[n]*extField[n] > 0){ R *= epsilon/(2.0+epsilon); }
+          else{                        R *= (2.0+epsilon)/epsilon; }
+         // if(spin[n]*extField[n] > 0){ R *= epsilon/(2.0+epsilon); ktot++; }
+         // else if(random_01() < epsilon/(2.0+epsilon)){ R *= (2.0+epsilon)/epsilon; ktot++; }
         }
         if(random_01() < R){ spin[n] *= -1; }
       }
@@ -395,15 +436,20 @@ public:
     obs["ktot"] << static_cast<double>(ktot);
     obs["ktot^2"] << static_cast<double>(ktot*ktot);
     double energy = (1.0+epsilon)*Jtot-T*ktot;
-    if( interaction=="SR" && ktot==0){
+    if(method=="metropolis"){
       energy=0;
-      for(int i=0 ; i<N ; i++){
-        for(int j=0 ; j < Lattice->num_nearest(i) ; j++){
-          int n = Lattice->nearestSite(i,j);
-          energy -= spin[i]*spin[n];
+      if(interaction!="free"){
+        for(int i=0 ; i<N ; i++){
+          for(int j=0 ; j < Lattice->num_nearest(i) ; j++){
+            int n = Lattice->nearestSite(i,j);
+            energy -= spin[i]*spin[n];
+          }
         }
+        energy/=2; //nearestSite() has double count
       }
-      energy/=2; //nearestSite() has double count
+      for(int i=0 ; i<N ; i++){
+        energy -= spin[i]*extField[i];
+      }
     }
     obs["Energy"] << energy;
     obs["Energy^2"] << energy*energy;
@@ -417,11 +463,11 @@ public:
 
   void save(alps::ODump& dp) const { 
     if(swapconfiguration=="off"){}
-    else{dp << mcs << spin;}
+    else{dp << mcs << spin << extField;}
   }
   void load(alps::IDump& dp) {
     if(swapconfiguration=="off"){}
-    else{dp >> mcs >> spin;}
+    else{dp >> mcs >> spin >> extField;}
   }
 
 private:
@@ -433,11 +479,16 @@ private:
   std::vector<int> spin; // spin configuration
   int sz;
 
+  double fieldintensity;
+  double rfstddev;
+  std::vector<double> extField;
+  double rho;
   double Jtot, epsilon;
   int numVert, numCell;
   std::string latticename;
   std::string interaction, normalization, swapconfiguration;
   std::string method;
+  std::string randomfield;
   double histogramPartition;
   double sigma, a;
   int L;

@@ -14,27 +14,27 @@ extern "C"{
 
 template<class randomDistribution> class correlatedDistribution{
 public:
-  //correlatedDistribution():mt(1L){} //L means long type
-  //correlatedDistribution():mt(std::time(0)){}
-  correlatedDistribution(){}
+  correlatedDistribution():gen(1L){} //L means long type
+  //correlatedDistribution():gen(std::time(0)){}
+  //correlatedDistribution(){}
 
-  std::vector<double> generate(alps::rng_helper::generator_type &gen){
-    //std::random_device rnd;
+//  std::vector<double> generate(alps::rng_helper::generator_type &gen){
+  std::vector<double> generate(){
     std::vector<double> sample(N);
     for(int i=0 ; i<N ; ++i){ sample[i] = dist(gen);}
     sample = product(sample,transMatrix);
     return sample;
   }
 
-  std::vector<double> genind(alps::rng_helper::generator_type &gen){
-    //std::random_device rnd;
+//  std::vector<double> genind(alps::rng_helper::generator_type &gen){
+  std::vector<double> genind(){
     std::vector<double> sample(N);
     for(int i=0 ; i<N ; ++i){ sample[i] = dist(gen);}
     return sample;
   }
 
 protected:
-//  boost::mt19937 mt;
+  boost::mt19937 gen;
   randomDistribution dist;
   std::vector<std::vector<double> > transMatrix;
   int N;
@@ -213,7 +213,7 @@ public:
     }
     this->dpotrf(corMatrix, this->transMatrix);
 
-    std::vector<std::vector<double> > tmp;
+/*    std::vector<std::vector<double> > tmp;
     tmp.resize(this->N);
     for(int i=0 ; i<this->N ; i++){tmp[i].resize(this->N);}
     for(int i=0; i<this->N; i++ ){
@@ -222,7 +222,7 @@ public:
       }
     }
 
-/*    for(int i=0 ; i<this->N ; ++i){
+    for(int i=0 ; i<this->N ; ++i){
       for(int j=0 ; j<this->N ; ++j){
         std::cout << tmp[i][j] <<" " ;
       }
