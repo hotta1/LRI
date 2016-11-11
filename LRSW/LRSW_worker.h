@@ -6,10 +6,11 @@
 #include <boost/math/special_functions/erf.hpp>   //for erfc()
 #include <alps/parapack/filelock.h>
 #include <boost/assign/list_of.hpp> //for boost::assign::list_of(x)(y)
+#include "ewald.h"
 #include "simpleLattice.h"//libraries must be included above header files.
 #include "walkerGenerator.h"
-#include "correlatedDistribution.h"
-#include "correlationMatrixGenerator.h"
+#include "correlatedDistributionGenerator.h"
+#include "RFGenerator.h"
 //#include <omp.h>
 
 //class LRSW_worker : public alps::parapack::lattice_mc_worker<> {
@@ -30,11 +31,15 @@ public:
     std::string absolutePATH;
     absolutePATH = params.value_or_default("ABSOLUTEPATH", "/home/hotta/LRI/LRSW/");
     std::string binarywalkerfile;
-    binarywalkerfile = params.value_or_default("BINARYWALKERFILE", "on");
+    std::string binarymatrixfile;
+    std::string binaryrffile;
+    binarywalkerfile = params.value_or_default("BINARYWALKERFILE", "off");
+    binarymatrixfile = params.value_or_default("BINARYMATRIXFILE", "off");
+    binaryrffile = params.value_or_default("BINARYRFFILE", "off");
     swapconfiguration = params.value_or_default("SWAPCONFIGURATION", "on");
     interaction = params.value_or_default("INTERACTION", "SR"); //"MF" "SR" "LRI" "free"
     method = params.value_or_default("METHOD", "metropolis");// "FTclu" "FTloc" "SW" "metropolis"
-    normalization = params.value_or_default("NORMALIZATION", "off"); //usage of normalization is not recommended since it deviate temperature at small N.
+    normalizeTemperature = params.value_or_default("NORMALIZETEMPERATURE", "off"); //usage of normalization is not recommended since it deviate temperature at small N.
     latticename = params.value_or_default("LATTICE", "square lattice");
     a = params.value_or_default("a", 1.0);
     L = params.value_or_default("L", 64);
@@ -43,7 +48,9 @@ public:
     sigma += static_cast<double>(dim);
     epsilon = params.value_or_default("EPSILON", 0.0);
     fieldintensity = params.value_or_default("FIELDINTENSITY", 0.0); // In the case using cluster method, external field is ighored.
+    std::string randomfield, rfcorrelation;
     randomfield = params.value_or_default("RANDOMFIELD", "off");
+    rfcorrelation = params.value_or_default("RFCORRELATION", "on");
     rfstddev = params.value_or_default("RFSTDDEV", 1.0);
     rho =  params.value_or_default("RHO", 1.0);
     rho = static_cast<double>(dim) - rho;
@@ -54,15 +61,33 @@ public:
     numCell = Lattice->numCell;
     N = Lattice->num_sites();
     spin.resize(N, 1); // spin configuration
+    int clone_id = params.value_or_default("CLONE_ID", 0);
+    std::cout <<"CLONE_ID: "<<clone_id<<std::endl;
+    double cormatnormalization;
+    cormatnormalization = params.value_or_default("TRANSMATNORMALIZATION", 0.0);
+    if(cormatnormalization==0.0){ cormatnormalization = static_cast<double>(dim) + 2.0; }
     if(randomfield=="on"){
-      std::vector<std::vector<double> > corMatrix;
-      correlationMatrixGenerator matGen(Lattice);
-      corMatrix = matGen.algebra(rho);
-      boost::normal_distribution<double> dist(fieldintensity, rfstddev);
-      corDistEigen<boost::normal_distribution<double> > corDist(corMatrix, dist);
-      extField = corDist.generate(generator_01());
-      //extField = corDist.genind(generator_01());
-    }// coming soon...
+      if(rfcorrelation=="on"){
+        if(binaryrffile=="on"){
+          RFGenerator RFGen;
+          extField = RFGen.load(Lattice, fieldintensity, rfstddev, cormatnormalization, rho, T, clone_id);
+        }
+        else{
+          boost::normal_distribution<double> dist(fieldintensity, rfstddev);
+//          correlatedDistributionGenerator<boost::normal_distribution<double> > corDistGen(Lattice, dist, cormatnormalization);
+          correlatedDistributionGenerator<boost::normal_distribution<double> > corDistGen(Lattice, dist);
+//          corDistGen.eigen(absolutePATH, rho, binarymatrixfile);
+          corDistGen.eigen(rho, cormatnormalization, absolutePATH, binarymatrixfile);
+          extField = corDistGen.generate(generator_01());
+        }
+      }
+      else{
+        boost::normal_distribution<double> dist(fieldintensity, rfstddev);
+//        correlatedDistributionGenerator<boost::normal_distribution<double> > corDistGen(Lattice, dist, cormatnormalization);
+        correlatedDistributionGenerator<boost::normal_distribution<double> > corDistGen(Lattice, dist);
+        extField = corDistGen.genind(generator_01());
+      }
+    }
     else{
       extField.resize(N,fieldintensity);
     }
@@ -96,7 +121,6 @@ public:
         JtotFN = genWalker.JtotFilename();
         std::string lockFN;
         lockFN = walkerFN;
-        lockFN += ".lck";
         boost::filesystem::path lockfile(lockFN);
         alps::filelock lock(lockfile);
         lock.lock();
@@ -118,7 +142,7 @@ public:
       else{
         walkerChoice = genWalker.instance(Jtot);
       }
-      if(normalization == "on"){
+      if(normalizeTemperature == "on"){
         std::cout << "Warning: Temperature normalization is not reccomended.(Because of weird definition of MF hamiltonian and a lack of self-interaction)" <<std::endl;
         lambdatot = (2.0+epsilon)*N/(2.0*T);
       }
@@ -137,7 +161,7 @@ public:
         Jtot += fabs(extField[i]);
       }
     }
-    std::cout <<"Jtot="<<Jtot<<std::endl;
+    //std::cout <<"Jtot="<<Jtot<<std::endl;
   }
 
   virtual ~LRSW_worker() {delete Lattice;}
@@ -157,31 +181,31 @@ public:
         << alps::RealObservable("Temperature")
         << alps::RealObservable("Number of Sites")
         << alps::HistogramObservable<double>("histogram", -1.0, 1.0, histogramPartition)
-        << alps::RealObservable("ktot")
-        << alps::RealObservable("ktot^2")
         << alps::RealObservable("Energy")
         << alps::RealObservable("Energy^2")
         << alps::RealObservable("Energy_normalized")
         << alps::RealObservable("Energy*Magnetization^2")
         << alps::RealObservable("Energy*Magnetization^4")
         << alps::RealObservable("Energy*Magnetization^6");
-    if( method=="FTclu" || method=="SW" ){
-      obs << alps::RealObservable("Magnetization^2 by graph")
-          << alps::RealObservable("Magnetization^4 by graph")
-          << alps::RealObservable("Magnetization^6 by graph")
-          << alps::RealObservable("Magnetization^8 by graph")
-          << alps::RealObservable("CorrelationFunction1_L/2")
-          << alps::RealObservable("CorrelationFunction1_L/4")
-          << alps::RealObservable("CorrelationFunction2_L/2")
-          << alps::RealObservable("CorrelationFunction2_L/4")
-          << alps::RealObservable("CorrelationFunction3_L/2")
-          << alps::RealObservable("CorrelationFunction3_L/4")
-          << alps::RealObservable("CorrelationFunction_1")
-          << alps::RealObservable("CorrelationFunction_16")
-          << alps::RealObservable("CorrelationFunction_64")
-          << alps::RealObservable("CorrelationFunction_256");
-//        << alps::RealObservable("Second Moment");
-    }
+    //aveilable only for cluster method
+    obs << alps::RealObservable("Correlation1_L/2")
+        << alps::RealObservable("Correlation1_L/4")
+        << alps::RealObservable("Correlation_1")
+        << alps::RealObservable("Correlation_2")
+        << alps::RealObservable("Correlation_4")
+        << alps::RealObservable("Correlation_8");
+/*    obs << alps::RealObservable("Magnetization^2 by cluster")
+        << alps::RealObservable("Magnetization^4 by cluster")
+        << alps::RealObservable("Magnetization^6 by cluster")
+        << alps::RealObservable("Magnetization^8 by cluster");*/
+//      << alps::RealObservable("Second Moment");
+    //aveilable only for FT method
+    obs << alps::RealObservable("ktot")
+        << alps::RealObservable("ktot^2");
+/*    obs << alps::RealObservable("Energy by FT")
+        << alps::RealObservable("Energy_normalized by FT");*/
+    obs << alps::RealObservable("Energy Conventional")
+        << alps::RealObservable("Energy^2 Conventional");
   }
 
   bool is_thermalized() const { return mcs >= MCTHRM; }
@@ -232,8 +256,8 @@ public:
       }
       std::vector<int> connectionExt(N,0);
       for(int i=0 ; i < N ; i++){
-   //     boost::poisson_distribution<> poisExt((2+epsilon)*fabs(extField[i])/T);
-        boost::poisson_distribution<> poisExt((1+epsilon+spin[i]*extField[i]/fabs(extField[i]))*fabs(extField[i])/T);
+        //boost::poisson_distribution<> poisExt((1+epsilon+spin[i]*extField[i]/fabs(extField[i]))*fabs(extField[i])/T);// this is not available when extField==0.
+        boost::poisson_distribution<> poisExt((1+epsilon+spin[i]*sign(extField[i]))*fabs(extField[i])/T);
         connectionExt[i] = poisExt(generator_01());
         ktot += connectionExt[i];
       }
@@ -249,23 +273,22 @@ public:
         for(int j=0 ; j < connectionExt[n] ; j++){
           if(spin[n]*extField[n] > 0){ R *= epsilon/(2.0+epsilon); }
           else{                        R *= (2.0+epsilon)/epsilon; }
-         // if(spin[n]*extField[n] > 0){ R *= epsilon/(2.0+epsilon); ktot++; }
-         // else if(random_01() < epsilon/(2.0+epsilon)){ R *= (2.0+epsilon)/epsilon; ktot++; }
         }
+        //R*=exp(-2*spin[n]*extField[n]/T);// this method is not available because ktot of external field is not able to be taken into account(and then estimation of energy and specheat becomes impossible).
         if(random_01() < R){ spin[n] *= -1; }
       }
     }
+
 
     //initialize bond flags
     for(int i=0 ; i<N ; i++){
       cluster[i]=i;
       numDescendantNode[i]=1;
     }
-
     //make clusters
     if( method=="SW" ){
       double prob = 1.0 - std::exp(-2.0/T);
-      if(normalization=="on"){
+      if(normalizeTemperature=="on"){
         int sumNumNearest = 0;
         for(int i=0 ; i<numVert ; i++){ sumNumNearest += Lattice->num_nearest(i); }
         prob = 1.0 - std::exp(-2.0*numVert/sumNumNearest/T);
@@ -282,7 +305,6 @@ public:
         }
       }
     }
-
     if( method=="FTclu"){
       int Ktot = pois(generator_01());
       for(int i=0 ; i < Ktot ; i++){
@@ -298,7 +320,6 @@ public:
         }
       }
     }
-
     double dclustersize_2=0, dclustersize_4=0, dclustersize_6=0, dclustersize_8=0;
     if( method=="FTclu" || method=="SW" ){
       //flip spins and get clustersize_X
@@ -328,105 +349,107 @@ public:
     for(int i=0 ; i<N ; i++){
       sz += spin[i] ;
     }
+    double dsz = sz / static_cast<double>(N);
 
+    int correlation1_2=0, correlation1_4=0, correlation_1=0, correlation_2=0, correlation_4=0, correlation_8=0, second_moment=0;
+    double m2, m4, m6, m8;
     if( method=="FTclu" || method=="SW" ){
-      int correlation1_2, correlation1_4, correlation2_2, correlation2_4, correlation3_2, correlation3_4, correlation_1, correlation_16, correlation_64, correlation_256, second_moment=0;
-      correlation1_2 = 0;
-      correlation1_4 = 0;
-      correlation2_2 = 0;
-      correlation2_4 = 0;
-      correlation3_2 = 0;
-      correlation3_4 = 0;
-      correlation_1 = 0;
-      correlation_16 = 0;
-      correlation_64 = 0;
-      correlation_256 = 0;
       for(int i=0 ; i<N ; i++){
-        int n1_2, n1_4, n2_2, n2_4, n3_2, n3_4, n_1, n_16, n_64, n_256;
+        int n1_2, n1_4, n_1, n_2, n_4, n_8;
         std::vector<int> shift;
-        shift = boost::assign::list_of(L/4)(0)(0);
+        shift.resize(dim+1,0);
+        shift[0] = L/4;
+        n1_2 = Lattice->shiftCoordinate(i, shift);
+        shift[0] = L/8;
+        n1_4 = Lattice->shiftCoordinate(i, shift);
+        shift[0] = 1;
+        n_1  = Lattice->shiftCoordinate(i, shift);
+        shift[0] = 2;
+        n_2 = Lattice->shiftCoordinate(i, shift);
+        shift[0] = 4;
+        n_4 = Lattice->shiftCoordinate(i, shift);
+        shift[0] = 8;
+        n_8 = Lattice->shiftCoordinate(i, shift);
+       /* shift = boost::assign::list_of(L/4)(0)(0);
         n1_2 = Lattice->shiftCoordinate(i, shift);
         shift = boost::assign::list_of(L/8)(0)(0);
         n1_4 = Lattice->shiftCoordinate(i, shift);
-        shift = boost::assign::list_of(0)(L/4)(0);
-        n2_2 = Lattice->shiftCoordinate(i, shift);
-        shift = boost::assign::list_of(0)(L/8)(0);
-        n2_4 = Lattice->shiftCoordinate(i, shift);
-        shift = boost::assign::list_of(L/4)(L/4)(0);
-        n3_2 = Lattice->shiftCoordinate(i, shift);
-        shift = boost::assign::list_of(L/8)(L/8)(0);
-        n3_4 = Lattice->shiftCoordinate(i, shift);
         shift = boost::assign::list_of(1)(0)(0);
         n_1  = Lattice->shiftCoordinate(i, shift);
-        shift = boost::assign::list_of(16)(0)(0);
-        n_16 = Lattice->shiftCoordinate(i, shift);
-        shift = boost::assign::list_of(64)(0)(0);
-        n_64 = Lattice->shiftCoordinate(i, shift);
-        shift = boost::assign::list_of(256)(0)(0);
-        n_256 = Lattice->shiftCoordinate(i, shift);
+        shift = boost::assign::list_of(2)(0)(0);
+        n_2 = Lattice->shiftCoordinate(i, shift);
+        shift = boost::assign::list_of(4)(0)(0);
+        n_4 = Lattice->shiftCoordinate(i, shift);
+        shift = boost::assign::list_of(8)(0)(0);
+        n_8 = Lattice->shiftCoordinate(i, shift);*/
         if(cluster[i] == cluster[n1_2]){ correlation1_2++; }
         if(cluster[i] == cluster[n1_4]){ correlation1_4++; }
-        if(cluster[i] == cluster[n2_2]){ correlation2_2++; }
-        if(cluster[i] == cluster[n2_4]){ correlation2_4++; }
-        if(cluster[i] == cluster[n3_2]){ correlation3_2++; }
-        if(cluster[i] == cluster[n3_4]){ correlation3_4++; }
         if(cluster[i] == cluster[n_1]){  correlation_1++; }
-        if(cluster[i] == cluster[n_16]){ correlation_16++; }
-        if(cluster[i] == cluster[n_64]){ correlation_64++; }
-        if(cluster[i] == cluster[n_256]){ correlation_256++; }
+        if(cluster[i] == cluster[n_2]){ correlation_2++; }
+        if(cluster[i] == cluster[n_4]){ correlation_4++; }
+        if(cluster[i] == cluster[n_8]){ correlation_8++; }
 //      second_moment += L/(2.0*M_PI)*std::sqrt(spin[i]/spin[n_1]-1.0);
       }
-  
-      double dcorrelation1_2 = correlation1_2/static_cast<double>(N);
-      double dcorrelation1_4 = correlation1_4/static_cast<double>(N);
-      double dcorrelation2_2 = correlation2_2/static_cast<double>(N);
-      double dcorrelation2_4 = correlation2_4/static_cast<double>(N);
-      double dcorrelation3_2 = correlation3_2/static_cast<double>(N);
-      double dcorrelation3_4 = correlation3_4/static_cast<double>(N);
-      double dcorrelation_1  = correlation_1/static_cast<double>(N);
-      double dcorrelation_16 = correlation_16/static_cast<double>(N);
-      double dcorrelation_64 = correlation_64/static_cast<double>(N);
-      double dcorrelation_256 = correlation_256/static_cast<double>(N);
-//    double dsecond_moment = second_moment/static_cast<double>(N);
-      double m2g, m4g, m6g, m8g;
-      m2g = dclustersize_2;
-      m4g = 3*dclustersize_2*dclustersize_2 - 2*dclustersize_4;
-      m6g = 15*dclustersize_2*dclustersize_2*dclustersize_2 - 30*dclustersize_4*dclustersize_2 + 16*dclustersize_6;
-      m8g = 105*dclustersize_2*dclustersize_2*dclustersize_2*dclustersize_2 +448*dclustersize_2*dclustersize_6 -420*dclustersize_2*dclustersize_2*dclustersize_4 +140*dclustersize_4*dclustersize_4 -272*dclustersize_8;
-      obs["Magnetization^2 by graph"] << m2g;
-      obs["Magnetization^4 by graph"] << m4g;
-      obs["Magnetization^6 by graph"] << m6g;
-      obs["Magnetization^8 by graph"] << m8g;
-      obs["CorrelationFunction1_L/2"] << dcorrelation1_2;
-      obs["CorrelationFunction1_L/4"] << dcorrelation1_4;
-      obs["CorrelationFunction2_L/2"] << dcorrelation2_2;
-      obs["CorrelationFunction2_L/4"] << dcorrelation2_4;
-      obs["CorrelationFunction3_L/2"] << dcorrelation3_2;
-      obs["CorrelationFunction3_L/4"] << dcorrelation3_4;
-      obs["CorrelationFunction_1"] << dcorrelation_1;
-      obs["CorrelationFunction_16"] << dcorrelation_16;
-      obs["CorrelationFunction_64"] << dcorrelation_64;
-      obs["CorrelationFunction_256"] << dcorrelation_16;
-//      obs["Second Moment"] << dsecond_moment;
+      m2 = dclustersize_2;
+      m4 = 3*dclustersize_2*dclustersize_2 - 2*dclustersize_4;
+      m6 = 15*dclustersize_2*dclustersize_2*dclustersize_2 - 30*dclustersize_4*dclustersize_2 + 16*dclustersize_6;
+      m8 = 105*dclustersize_2*dclustersize_2*dclustersize_2*dclustersize_2 +448*dclustersize_2*dclustersize_6 -420*dclustersize_2*dclustersize_2*dclustersize_4 +140*dclustersize_4*dclustersize_4 -272*dclustersize_8;
+/*      obs["Magnetization^2 by cluster"] << m2c;
+      obs["Magnetization^4 by cluster"] << m4c;
+      obs["Magnetization^6 by cluster"] << m6c;
+      obs["Magnetization^8 by cluster"] << m8c;*/
     }
-    double dsz = sz / static_cast<double>(N);
-/*    obs["Magnetization"] << dsz;
-    obs["Magnetization^2"] << dsz*dsz;
-    obs["Magnetization^3"] << dsz*dsz*dsz;
-    obs["Magnetization^4"] << dsz*dsz*dsz*dsz;
-    obs["Magnetization^5"] << dsz*dsz*dsz*dsz*dsz;
-    obs["Magnetization^6"] << dsz*dsz*dsz*dsz*dsz*dsz;
-    obs["Magnetization^7"] << dsz*dsz*dsz*dsz*dsz*dsz*dsz;
-    obs["Magnetization^8"] << dsz*dsz*dsz*dsz*dsz*dsz*dsz*dsz;
-    obs["Magnetization^9"] << dsz*dsz*dsz*dsz*dsz*dsz*dsz*dsz*dsz;
-    obs["Magnetization^10"] << dsz*dsz*dsz*dsz*dsz*dsz*dsz*dsz*dsz*dsz;*/
-    obs["Magnetization^2"] << powint(dsz,2);
+    else{
+      for(int i=0 ; i<N ; i++){
+        int n1_2, n1_4, n_1, n_2, n_4, n_8;
+        std::vector<int> shift;
+        shift.resize(dim+1,0);
+        shift[0] = L/4;
+        n1_2 = Lattice->shiftCoordinate(i, shift);
+        shift[0] = L/8;
+        n1_4 = Lattice->shiftCoordinate(i, shift);
+        shift[0] = 1;
+        n_1  = Lattice->shiftCoordinate(i, shift);
+        shift[0] = 2;
+        n_2 = Lattice->shiftCoordinate(i, shift);
+        shift[0] = 4;
+        n_4 = Lattice->shiftCoordinate(i, shift);
+        shift[0] = 8;
+        n_8 = Lattice->shiftCoordinate(i, shift);
+        correlation1_2 += spin[i]*spin[n1_2];
+        correlation1_4 += spin[i]*spin[n1_4];
+        correlation_1 += spin[i]*spin[n_1];
+        correlation_2 += spin[i]*spin[n_2];
+        correlation_4 += spin[i]*spin[n_4];
+        correlation_8 += spin[i]*spin[n_8];
+      }
+      m2 = powint(dsz,2);
+      m4 = powint(dsz,4);
+      m6 = powint(dsz,6);
+      m8 = powint(dsz,8);
+    }
+    obs["Magnetization^2"] << m2;
+    obs["Magnetization^4"] << m4;
+    obs["Magnetization^6"] << m6;
+    obs["Magnetization^8"] << m8;
+    double dcorrelation1_2 = correlation1_2/static_cast<double>(N);
+    double dcorrelation1_4 = correlation1_4/static_cast<double>(N);
+    double dcorrelation_1 = correlation_1/static_cast<double>(N);
+    double dcorrelation_2 = correlation_2/static_cast<double>(N);
+    double dcorrelation_4 = correlation_4/static_cast<double>(N);
+    double dcorrelation_8 = correlation_8/static_cast<double>(N);
+//  double dsecond_moment = second_moment/static_cast<double>(N);
+    obs["Correlation1_L/2"] << dcorrelation1_2;
+    obs["Correlation1_L/4"] << dcorrelation1_4;
+    obs["Correlation_1"] << dcorrelation_1;
+    obs["Correlation_2"] << dcorrelation_2;
+    obs["Correlation_4"] << dcorrelation_4;
+    obs["Correlation_8"] << dcorrelation_8;
+//  obs["Second Moment"] << dsecond_moment;
+    obs["Magnetization"] << dsz;
     obs["Magnetization^3"] << powint(dsz,3);
-    obs["Magnetization^4"] << powint(dsz,4);
     obs["Magnetization^5"] << powint(dsz,5);
-    obs["Magnetization^6"] << powint(dsz,6);
     obs["Magnetization^7"] << powint(dsz,7);
-    obs["Magnetization^8"] << powint(dsz,8);
     obs["Magnetization^9"] << powint(dsz,9);
     obs["Magnetization^10"] << powint(dsz,10);
     obs["|Magnetization|"] << std::abs(dsz);
@@ -435,9 +458,14 @@ public:
     obs["histogram"] << dsz;
     obs["ktot"] << static_cast<double>(ktot);
     obs["ktot^2"] << static_cast<double>(ktot*ktot);
-    double energy = (1.0+epsilon)*Jtot-T*ktot;
-    if(method=="metropolis"){
-      energy=0;
+    double energy=0;
+    if( method=="FTclu" || method=="FTloc" ){
+      energy = (1.0+epsilon)*Jtot-T*ktot;
+/*      double energyFT = (1.0+epsilon)*Jtot-T*ktot;
+      obs["Energy by FT"] << energyFT;
+      obs["Energy_normalized by FT"] << energyFT/Jtot;//(1.0+epsilon) - T*ktot/Jtot;*/
+    }
+    else{
       if(interaction!="free"){
         for(int i=0 ; i<N ; i++){
           for(int j=0 ; j < Lattice->num_nearest(i) ; j++){
@@ -445,29 +473,45 @@ public:
             energy -= spin[i]*spin[n];
           }
         }
-        energy/=2; //nearestSite() has double count
       }
+      energy/=2; //nearestSite() has double count
       for(int i=0 ; i<N ; i++){
         energy -= spin[i]*extField[i];
       }
     }
     obs["Energy"] << energy;
     obs["Energy^2"] << energy*energy;
-    obs["Energy_normalized"] << energy/Jtot;//(1.0+epsilon) - T*ktot/Jtot;
-    obs["Energy*Magnetization^2"] << energy*dsz*dsz;
-    obs["Energy*Magnetization^4"] << energy*dsz*dsz*dsz*dsz;
-    obs["Energy*Magnetization^6"] << energy*dsz*dsz*dsz*dsz*dsz*dsz;
+    obs["Energy_normalized"] << energy/Jtot;
+    obs["Energy*Magnetization^2"] << energy*powint(dsz,2);
+    obs["Energy*Magnetization^4"] << energy*powint(dsz,4);
+    obs["Energy*Magnetization^6"] << energy*powint(dsz,6);
+
+    double energyconv=0;
+    if(interaction=="SR"){
+      for(int i=0 ; i<N ; i++){
+        for(int j=0 ; j < Lattice->num_nearest(i) ; j++){
+          int n = Lattice->nearestSite(i,j);
+          energyconv -= spin[i]*spin[n];
+        }
+      }
+    }
+    energyconv/=2; //nearestSite() has double count
+    for(int i=0 ; i<N ; i++){
+      energyconv -= spin[i]*extField[i];
+    }
+    obs["Energy Conventional"] << energyconv;
+    obs["Energy^2 Conventional"] << energyconv*energyconv;
     return;
   }
 
 
   void save(alps::ODump& dp) const { 
     if(swapconfiguration=="off"){}
-    else{dp << mcs << spin << extField;}
+    else{dp << mcs << spin << extField << Jtot;}
   }
   void load(alps::IDump& dp) {
     if(swapconfiguration=="off"){}
-    else{dp >> mcs >> spin >> extField;}
+    else{dp >> mcs >> spin >> extField >> Jtot;}
   }
 
 private:
@@ -486,9 +530,8 @@ private:
   double Jtot, epsilon;
   int numVert, numCell;
   std::string latticename;
-  std::string interaction, normalization, swapconfiguration;
+  std::string interaction, normalizeTemperature, swapconfiguration;
   std::string method;
-  std::string randomfield;
   double histogramPartition;
   double sigma, a;
   int L;
@@ -528,26 +571,124 @@ private:
     else{for(int i=0 ; i>n ; i--){ ans/=x; }}
     return ans;
   }
+  template<typename type>
+  inline int sign(type x){ return (x>0) - (x<0); } //return sign of x. if x is 0, return 0.
 };
 
 
 class LRSW_evaluator : public alps::parapack::simple_evaluator {
+private:
+  std::string method;
+  std::string randomfield;
+
 public:
-  LRSW_evaluator(alps::Parameters const&) {}
+  LRSW_evaluator(alps::Parameters const& params) {
+    method = params.value_or_default("METHOD", "metropolis");// "FTclu" "FTloc" "SW" "metropolis"
+    randomfield = params.value_or_default("RANDOMFIELD", "off");
+  }
+
+  void load(alps::ObservableSet const& obs_in, alps::ObservableSet& obs_out){
+    alps::ObservableSet obs = obs_in;
+    if(randomfield == "on"){  // connected estimation toward the system without randomness makes overestimation of error.
+      alps::RealObsevaluator mabs = obs["|Magnetization|"];
+      alps::RealObsevaluator m2 = obs["Magnetization^2"];
+      alps::RealObsevaluator m4 = obs["Magnetization^4"];
+      alps::RealObsevaluator T = obs["Temperature"];
+      alps::RealObsevaluator N = obs["Number of Sites"];
+      alps::RealObsevaluator ktot = obs["ktot"];
+      alps::RealObsevaluator ktot2 = obs["ktot^2"];
+      alps::RealObsevaluator energy = obs["Energy"];
+      alps::RealObsevaluator energy2 = obs["Energy^2"];
+      
+      if(obs_out.find("Binder Ratio of Magnetization connected")==obs_out.end()){ obs_out << alps::RealObservable("Binder Ratio of Magnetization connected"); }
+      if(obs_out.find("<Magnetization^2>^2")==obs_out.end()){ obs_out << alps::RealObservable("<Magnetization^2>^2"); }
+      if(obs_out.find("<Magnetization^4>")==obs_out.end()){ obs_out << alps::RealObservable("<Magnetization^4>"); }
+      if(obs_out.find("Magnetic Susceptibility")==obs_out.end()){ obs_out << alps::RealObservable("Magnetic Susceptibility"); }
+      if(obs_out.find("Magnetic Susceptibility for Scaling")==obs_out.end()){ obs_out << alps::RealObservable("Magnetic Susceptibility for Scaling"); }
+      if(obs_out.find("Specific Heat")==obs_out.end()){ obs_out << alps::RealObservable("Specific Heat"); }
+      
+      alps::RealObsevaluator value("Physical Quantity");
+      value = m2*m2 / m4;
+      obs_out["Binder Ratio of Magnetization connected"] << value.mean();
+      value = m2*m2;
+      obs_out["<Magnetization^2>^2"] << value.mean();
+      value = m4;
+      obs_out["<Magnetization^4>"] << value.mean();
+      value = (m2-mabs*mabs)/T*N; // (<M^2>-<M>^2)/T/V = (<m^2>-<m>^2)*V^2/T/V = (<m^2>-<m>^2)/T*V 
+      obs_out["Magnetic Susceptibility"] << value.mean();
+      value = m2/T*N;
+      obs_out["Magnetic Susceptibility for Scaling"] << value.mean();
+      if(method=="FTclu"||method=="FTloc"){ value = (ktot2-ktot*ktot-ktot)/N; }// (<ktot^2>-<ktot>^2-<ktot>)/V  for FT method
+      else{                                 value = (energy2-energy*energy)/(T*T*N); }// (<E^2>-<E>^2)/(T*T)/V  for conventional method
+      obs_out["Specific Heat"] << value.mean();
+    }
+    
+    obs_out << obs;
+//    std::cout << "kitty on your lap" <<std::endl;
+  }
+
+
   void evaluate(alps::ObservableSet& obs) const {
-//    alps::RealObsevaluator m2 = obs["Magnetization^2 by graph"];
-//    alps::RealObsevaluator m4 = obs["Magnetization^4 by graph"];
-//    alps::RealObsevaluator m6 = obs["Magnetization^6 by graph"];
-//    alps::RealObsevaluator m8 = obs["Magnetization^8 by graph"];
-    double dev[8] = {0.214002, 0.18885, 0.0938762, 0.262266, 0.257176, 0.276397, 0.162642, 0.221176};
+    alps::RealObsevaluator mabs = obs["|Magnetization|"];
     alps::RealObsevaluator m2 = obs["Magnetization^2"];
     alps::RealObsevaluator m4 = obs["Magnetization^4"];
-    alps::RealObsevaluator m6 = obs["Magnetization^6"];
-    alps::RealObsevaluator m8 = obs["Magnetization^8"];
+    alps::RealObsevaluator T = obs["Temperature"];
+    alps::RealObsevaluator N = obs["Number of Sites"];
+    alps::RealObsevaluator ktot = obs["ktot"];
+    alps::RealObsevaluator ktot2 = obs["ktot^2"];
+    alps::RealObsevaluator energy = obs["Energy"];
+    alps::RealObsevaluator energy2 = obs["Energy^2"];
 
-    alps::RealObsevaluator binder("Binder Ratio of Magnetization");
+    if(randomfield != "on"){
+      alps::RealObsevaluator binder("Binder Ratio of Magnetization");
+      binder = m2*m2 / m4;
+      obs.addObservable(binder);
+      alps::RealObsevaluator magsus("Magnetic Susceptibility");
+      magsus = (m2-mabs*mabs)/T*N; // (<M^2>-<M>^2)/T/V = (<m^2>-<m>^2)*V^2/T/V = (<m^2>-<m>^2)/T*V 
+      obs.addObservable(magsus);
+      alps::RealObsevaluator magsussca("Magnetic Susceptibility for Scaling");
+      magsussca = m2/T*N;
+      obs.addObservable(magsussca);
+      alps::RealObsevaluator specheat("Specific Heat");
+      if(method=="FTclu"||method=="FTloc"){ specheat = (ktot2-ktot*ktot-ktot)/N; }// (<ktot^2>-<ktot>^2-<ktot>)/V  for FT method
+      else{                                 specheat = (energy2-energy*energy)/(T*T*N); }// (<E^2>-<E>^2)/(T*T)/V  for conventional method
+      obs.addObservable(specheat);
+    }
+    else{
+      alps::RealObsevaluator m22 = obs["<Magnetization^2>^2"];
+      alps::RealObsevaluator m4_ = obs["<Magnetization^4>"];
+      alps::RealObsevaluator binder("Binder Ratio of Magnetization");
+      binder = m22 / m4_;
+      obs.addObservable(binder);
+    }
+    alps::RealObsevaluator binder("Binder Ratio of Magnetization disconnected");
     binder = m2*m2 / m4;
     obs.addObservable(binder);
+    alps::RealObsevaluator magsus("Magnetic Susceptibility disconnected");
+    magsus = (m2-mabs*mabs)/T*N; // (<M^2>-<M>^2)/T/V = (<m^2>-<m>^2)*V^2/T/V = (<m^2>-<m>^2)/T*V 
+    obs.addObservable(magsus);
+    alps::RealObsevaluator magsussca("Magnetic Susceptibility for Scaling disconnected");
+    magsussca = m2/T*N;
+    obs.addObservable(magsussca);
+    alps::RealObsevaluator specheat("Specific Heat disconnected");
+    if(method=="FTclu"||method=="FTloc"){ specheat = (ktot2-ktot*ktot-ktot)/N; }// (<ktot^2>-<ktot>^2-<ktot>)/V  for FT method
+    else{                                 specheat = (energy2-energy*energy)/(T*T*N); }// (<E^2>-<E>^2)/(T*T)/V  for conventional method
+    obs.addObservable(specheat);
+
+
+    alps::RealObsevaluator energyconv = obs["Energy Conventional"];
+    alps::RealObsevaluator energyconv2 = obs["Energy^2 Conventional"];
+    alps::RealObsevaluator specheatconv("Specific Heat Conventional");
+    specheatconv = (energyconv2-energyconv*energyconv)/(T*T*N);// (<E^2>-<E>^2)/(T*T)/V  for conventional method
+    obs.addObservable(specheatconv);
+    alps::RealObsevaluator specheatft("Specific Heat by FT");
+    specheatft = (ktot2-ktot*ktot-ktot)/N;// (<ktot^2>-<ktot>^2-<ktot>)/V  for FT method
+    obs.addObservable(specheatft);
+
+
+    alps::RealObsevaluator m6 = obs["Magnetization^6"];
+    alps::RealObsevaluator m8 = obs["Magnetization^8"];
+    double dev[8] = {0.214002, 0.18885, 0.0938762, 0.262266, 0.257176, 0.276397, 0.162642, 0.221176};
     alps::RealObsevaluator binder2("Binder Ratio of Magnetization 2");
     binder2 = m2*m2*m2 / m6;
     obs.addObservable(binder2);
@@ -576,6 +717,18 @@ public:
     alps::RealObsevaluator combinderinv("Combined Binder Inverse");
     combinderinv = binder/0.456947 + binderinv*0.456947;
     obs.addObservable(combinderinv);
+
+    for(int i=1 ; i<9 ; ++i){
+      std::stringstream val;
+      val << i;
+      std::string str = val.str();
+      alps::RealObsevaluator combinderinvdevplus("Combined Binder Inverse +0.0"+str);
+      alps::RealObsevaluator combinderinvdevminus("Combined Binder Inverse -0.0"+str);
+      combinderinvdevplus = binder/(0.456947+0.01*i) + binderinv*(0.456947+0.01*i);
+      combinderinvdevminus = binder/(0.456947-0.01*i) + binderinv*(0.456947-0.01*i);
+      obs.addObservable(combinderinvdevplus);
+      obs.addObservable(combinderinvdevminus);
+    }
 
     alps::RealObsevaluator binderinv2("Binder Ratio of Magnetization Inverse 2");
     binderinv2 = m6 / (m4*m2);
@@ -696,8 +849,6 @@ public:
     comcombinder12inv = combinder12/0.2843448 + combinder12inv*0.2843448;
     obs.addObservable(comcombinder12inv);
 
-    alps::RealObsevaluator T = obs["Temperature"];
-    alps::RealObsevaluator energy = obs["Energy"];
     alps::RealObsevaluator eneM2 = obs["Energy*Magnetization^2"];
     alps::RealObsevaluator eneM4 = obs["Energy*Magnetization^4"];
     alps::RealObsevaluator eneM6 = obs["Energy*Magnetization^6"];
@@ -728,36 +879,12 @@ public:
     alps::RealObsevaluator dercombinderinvT("Derivative of Combined Binder inverse by T");
     dercombinderinvT = (-1)*dercombinderinvK/(T*T);
     obs.addObservable(dercombinderinvT);
-
-    alps::RealObsevaluator mabs = obs["|Magnetization|"];
-    alps::RealObsevaluator N = obs["Number of Sites"];
-    alps::RealObsevaluator energy2 = obs["Energy^2"];
-    alps::RealObsevaluator magsus("Magnetic Susceptibility");
-    magsus = (m2-mabs*mabs)/T*N; // (<M^2>-<M>^2)/T/V = (<m^2>-<m>^2)*V^2/T/V = (<m^2>-<m>^2)/T*V 
-    obs.addObservable(magsus);
-    alps::RealObsevaluator specheat("Specific Heat");
-//    specheat = (energy2-energy*energy)/(T*T*N);// (<E^2>-<E>^2)/(T*T)/V  for conventional method
-    alps::RealObsevaluator ktot = obs["ktot"];
-    alps::RealObsevaluator ktot2 = obs["ktot^2"];
-    specheat = (ktot2-ktot*ktot-ktot)/N;// (<ktot^2>-<ktot>^2-<ktot>)/V  for FT method
-    obs.addObservable(specheat);
-
 /*
-    alps::RealObsevaluator C1_2 = obs["CorrelationFunction1_L/2"];
-    alps::RealObsevaluator C1_4 = obs["CorrelationFunction1_L/4"];
-    alps::RealObsevaluator C2_2 = obs["CorrelationFunction2_L/2"];
-    alps::RealObsevaluator C2_4 = obs["CorrelationFunction2_L/4"];
-    alps::RealObsevaluator C3_2 = obs["CorrelationFunction3_L/2"];
-    alps::RealObsevaluator C3_4 = obs["CorrelationFunction3_L/4"];
-    alps::RealObsevaluator CorRatio1("Correlation Ratio 1");
-    alps::RealObsevaluator CorRatio2("Correlation Ratio 2");
-    alps::RealObsevaluator CorRatio3("Correlation Ratio 3");
-    CorRatio1 = C1_2 / C1_4;
-    CorRatio2 = C2_2 / C2_4;
-    CorRatio3 = C3_2 / C3_4;
-    obs.addObservable(CorRatio1);
-    obs.addObservable(CorRatio2);
-    obs.addObservable(CorRatio3);*/
+    alps::RealObsevaluator C1_2 = obs["Correlation1_L/2"];
+    alps::RealObsevaluator C1_4 = obs["Correlation1_L/4"];
+    alps::RealObsevaluator CorRatio("Correlation Ratio");
+    CorRatio = C1_2 / C1_4;
+    obs.addObservable(CorRatio);*/
   }
 };
 

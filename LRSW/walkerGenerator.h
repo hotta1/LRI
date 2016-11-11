@@ -2,12 +2,13 @@
 #include <sstream>
 #include <fstream>
 //#include "ewald2d.h" 
-#include "ewald.h"
+#include<boost/timer/timer.hpp>
 
 class walkerGenerator{
 private:
   simpleLattice* Lattice;
-  std::vector<double> latticeConstant, latticeLength;
+  //std::vector<double> latticeConstant;
+  std::vector<double> latticeLength;
   std::vector<int> cellSize;
   int N, numVert, numCell, dim;
   std::string latticename, interaction;
@@ -17,7 +18,7 @@ private:
 public:
   walkerGenerator(simpleLattice* Lattice_, std::string interaction_, double sigma_, std::string absolutePATH_){
     Lattice = Lattice_;
-    latticeConstant = Lattice->latticeConstant;
+    //latticeConstant = Lattice->latticeConstant;
     latticeLength = Lattice->latticeLength;
     cellSize = Lattice->cellSize;
     N = Lattice->num_sites();
@@ -66,18 +67,10 @@ public:
     std::ostringstream filename;
     filename << absolutePATH << "walkerTable/";
     filename << dim <<"D"<< latticename <<"_";
-    for(int i=0 ; i<dim ; i++){
-      filename << "L" << i+1 << "-" << cellSize[i]<<"_";
-    }
-    for(int i=0 ; i<dim ; i++){
-      filename << "a" << i+1 << "-" << latticeConstant[i] <<"_";
-    }
-    if(interaction == "LRI"){
-      filename << "sigma-" << sigma;
-    }
-    else{
-      filename << interaction;
-    }
+    for(int i=0 ; i<dim ; i++){ filename << "L" << i+1 << "-" << cellSize[i]<<"_"; }
+    //for(int i=0 ; i<dim ; i++){ filename << "a" << i+1 << "-" << latticeConstant[i] <<"_"; }
+    if(interaction == "LRI"){ filename << "sigma-" << sigma; }
+    else{ filename << interaction; }
     filename << ".xdr" ;
     std::string tmp;
     tmp = filename.str();
@@ -88,18 +81,10 @@ public:
     std::ostringstream filename;
     filename << absolutePATH << "Jtot/";
     filename << dim <<"D"<< latticename <<"_";
-    for(int i=0 ; i<dim ; i++){
-      filename << "L" << i+1 << "-" << cellSize[i]<<"_";
-    }
-    for(int i=0 ; i<dim ; i++){
-      filename << "a" << i+1 << "-" << latticeConstant[i] <<"_";
-    }
-    if(interaction == "LRI"){
-      filename << "sigma-" << sigma;
-    }
-    else{
-      filename << interaction;
-    }
+    for(int i=0 ; i<dim ; i++){ filename << "L" << i+1 << "-" << cellSize[i]<<"_"; }
+    //for(int i=0 ; i<dim ; i++){ filename << "a" << i+1 << "-" << latticeConstant[i] <<"_"; }
+    if(interaction == "LRI"){ filename << "sigma-" << sigma; }
+    else{ filename << interaction; }
     filename << ".txt" ;
     std::string tmp;
     tmp = filename.str();
@@ -109,6 +94,7 @@ public:
 
 private:
   void calcBondprob(std::vector<double>& bondprob, double& Jtot){
+    boost::timer::cpu_timer timer;
     ewald ewaldsum(latticeLength, sigma,4,4);//for the system with anisotropy, autohnumax must be implemented.
 //    ewald ewaldsum(latticeLength, sigma);
     std::vector<double> origin;
@@ -149,6 +135,8 @@ private:
     }
     Jtot *= numCell;
     Jtot /= 2.0; //  /2.0 exists to counter double count.
+    std::cout << "Finished creating interaction table. It takes " << timer.format() << std::endl;
+    return;
   }
 };
 

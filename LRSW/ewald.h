@@ -289,6 +289,7 @@ private:
   }
   inline double negativetgamma(double a, double x){
     if(a>0.0){ return boost::math::tgamma(a,x); }
+    else if(a==0.0){ return -1.0*boost::math::expint(-x); }
     else{ return -1.*pow(x,a)*exp(-x)/a + negativetgamma(a+1.,x)/a; }
   }
 
