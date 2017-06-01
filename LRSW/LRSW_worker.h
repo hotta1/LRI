@@ -38,6 +38,7 @@ public:
     binaryrffile = params.value_or_default("BINARYRFFILE", "off");
     swapconfiguration = params.value_or_default("SWAPCONFIGURATION", "on");
     interaction = params.value_or_default("INTERACTION", "SR"); //"MF" "SR" "LRI" "free"
+    sequentialupdate = params.value_or_default("SEQUENTIALUPDATE", "on");
     method = params.value_or_default("METHOD", "metropolis");// "FTclu" "FTloc" "SW" "metropolis"
     normalizeTemperature = params.value_or_default("NORMALIZETEMPERATURE", "off"); //usage of normalization is not recommended since it deviate temperature at small N.
     latticename = params.value_or_default("LATTICE", "square lattice");
@@ -47,9 +48,14 @@ public:
     sigma = params.value_or_default("SIGMA", 1.0);
     sigma += static_cast<double>(dim);
     epsilon = params.value_or_default("EPSILON", 0.0);
-    fieldintensity = params.value_or_default("FIELDINTENSITY", 0.0); // In the case using cluster method, external field is ighored.
+    double uniformfield;
+    uniformfield = params.value_or_default("UNIFORMFIELD", 0.0); // In the case using cluster method, external field is ighored.
     std::string randomfield, rfcorrelation;
     randomfield = params.value_or_default("RANDOMFIELD", "off");
+    std::string rftdependence;
+    rftdependence = params.value_or_default("RFTDEPENDENCE", "off");
+    double rftcoef;
+    rftcoef = params.value_or_default("RFTCOEF", 0.35);
     rfcorrelation = params.value_or_default("RFCORRELATION", "on");
     rfstddev = params.value_or_default("RFSTDDEV", 1.0);
     rho =  params.value_or_default("RHO", 1.0);
@@ -64,32 +70,39 @@ public:
     int clone_id = params.value_or_default("CLONE_ID", 0);
     std::cout <<"CLONE_ID: "<<clone_id<<std::endl;
     double cormatnormalization;
-    cormatnormalization = params.value_or_default("TRANSMATNORMALIZATION", 0.0);
+    cormatnormalization = params.value_or_default("CORMATNORMALIZATION", 0.0);
     if(cormatnormalization==0.0){ cormatnormalization = static_cast<double>(dim) + 2.0; }
     if(randomfield=="on"){
+      std::vector<double> RF(N, 0.0);
       if(rfcorrelation=="on"){
         if(binaryrffile=="on"){
           RFGenerator RFGen;
-          extField = RFGen.load(Lattice, fieldintensity, rfstddev, cormatnormalization, rho, T, clone_id);
+//          extField = RFGen.load(Lattice, uniformfield, rfstddev, cormatnormalization, rho, T, clone_id);
+          RF = RFGen.load(Lattice, rfstddev, cormatnormalization, rho, T, clone_id);
         }
         else{
-          boost::normal_distribution<double> dist(fieldintensity, rfstddev);
-//          correlatedDistributionGenerator<boost::normal_distribution<double> > corDistGen(Lattice, dist, cormatnormalization);
+//          boost::normal_distribution<double> dist(uniformfield, rfstddev);
+          boost::normal_distribution<double> dist(0.0, rfstddev);
           correlatedDistributionGenerator<boost::normal_distribution<double> > corDistGen(Lattice, dist);
-//          corDistGen.eigen(absolutePATH, rho, binarymatrixfile);
-          corDistGen.eigen(rho, cormatnormalization, absolutePATH, binarymatrixfile);
-          extField = corDistGen.generate(generator_01());
+          corDistGen.corAlgebra(rho, cormatnormalization);
+          corDistGen.eigen(absolutePATH, binarymatrixfile);
+//          extField = corDistGen.generate(generator_01());
+          RF = corDistGen.generate(generator_01());
         }
       }
       else{
-        boost::normal_distribution<double> dist(fieldintensity, rfstddev);
-//        correlatedDistributionGenerator<boost::normal_distribution<double> > corDistGen(Lattice, dist, cormatnormalization);
+//        boost::normal_distribution<double> dist(uniformfield, rfstddev);
+        boost::normal_distribution<double> dist(0.0, rfstddev);
         correlatedDistributionGenerator<boost::normal_distribution<double> > corDistGen(Lattice, dist);
-        extField = corDistGen.genind(generator_01());
+//        extField = corDistGen.genind(generator_01());
+        RF = corDistGen.genind(generator_01());
       }
+      extField.resize(N);
+      if(rftdependence=="on"){ for(int i=0 ; i<N ; ++i){ extField[i] = RF[i]*rftcoef*T + uniformfield; } }
+      else{ for(int i=0 ; i<N ; ++i){ extField[i] = RF[i] + uniformfield; } }
     }
     else{
-      extField.resize(N,fieldintensity);
+      extField.resize(N,uniformfield);
     }
     sz = N;
     if( N <= 128 ){histogramPartition = 2.0/static_cast<double>(N);}
@@ -219,8 +232,8 @@ public:
     if(method=="metropolis"){
       for(int i=0 ; i<N ; i++){
         int n1;
-        //n1 = i; //sequential
-        n1 = (int)(N*random_01()); //at random
+        if(sequentialupdate=="on"){ n1 = i; } //sequential
+        else{ n1 = (int)(N*random_01()); }//at random
         double egap = 0;
         if(interaction!="free"){
           for(int j=0 ; j < Lattice->num_nearest(n1) ; j++){
@@ -263,7 +276,9 @@ public:
       }
       //flip spins
       for(int i=0 ; i<N ; ++i){
-        int n = (int)(N*random_01());
+        int n;
+        if(sequentialupdate=="on"){ n = i; } //sequential
+        else{ n = (int)(N*random_01()); } //at random
         double R = 1.0;
         for(int j=0 ; j < connection[n].size() ; j++){
           if(spin[n]==spin[connection[n][j]]){ R *= epsilon/(2.0+epsilon); }
@@ -523,7 +538,6 @@ private:
   std::vector<int> spin; // spin configuration
   int sz;
 
-  double fieldintensity;
   double rfstddev;
   std::vector<double> extField;
   double rho;
@@ -532,6 +546,7 @@ private:
   std::string latticename;
   std::string interaction, normalizeTemperature, swapconfiguration;
   std::string method;
+  std::string sequentialupdate;
   double histogramPartition;
   double sigma, a;
   int L;
@@ -589,42 +604,56 @@ public:
 
   void load(alps::ObservableSet const& obs_in, alps::ObservableSet& obs_out){
     alps::ObservableSet obs = obs_in;
-    if(randomfield == "on"){  // connected estimation toward the system without randomness makes overestimation of error.
-      alps::RealObsevaluator mabs = obs["|Magnetization|"];
-      alps::RealObsevaluator m2 = obs["Magnetization^2"];
-      alps::RealObsevaluator m4 = obs["Magnetization^4"];
-      alps::RealObsevaluator T = obs["Temperature"];
-      alps::RealObsevaluator N = obs["Number of Sites"];
-      alps::RealObsevaluator ktot = obs["ktot"];
-      alps::RealObsevaluator ktot2 = obs["ktot^2"];
-      alps::RealObsevaluator energy = obs["Energy"];
-      alps::RealObsevaluator energy2 = obs["Energy^2"];
-      
-      if(obs_out.find("Binder Ratio of Magnetization connected")==obs_out.end()){ obs_out << alps::RealObservable("Binder Ratio of Magnetization connected"); }
-      if(obs_out.find("<Magnetization^2>^2")==obs_out.end()){ obs_out << alps::RealObservable("<Magnetization^2>^2"); }
-      if(obs_out.find("<Magnetization^4>")==obs_out.end()){ obs_out << alps::RealObservable("<Magnetization^4>"); }
-      if(obs_out.find("Magnetic Susceptibility")==obs_out.end()){ obs_out << alps::RealObservable("Magnetic Susceptibility"); }
-      if(obs_out.find("Magnetic Susceptibility for Scaling")==obs_out.end()){ obs_out << alps::RealObservable("Magnetic Susceptibility for Scaling"); }
-      if(obs_out.find("Specific Heat")==obs_out.end()){ obs_out << alps::RealObservable("Specific Heat"); }
-      
-      alps::RealObsevaluator value("Physical Quantity");
-      value = m2*m2 / m4;
-      obs_out["Binder Ratio of Magnetization connected"] << value.mean();
-      value = m2*m2;
-      obs_out["<Magnetization^2>^2"] << value.mean();
-      value = m4;
-      obs_out["<Magnetization^4>"] << value.mean();
-      value = (m2-mabs*mabs)/T*N; // (<M^2>-<M>^2)/T/V = (<m^2>-<m>^2)*V^2/T/V = (<m^2>-<m>^2)/T*V 
-      obs_out["Magnetic Susceptibility"] << value.mean();
-      value = m2/T*N;
-      obs_out["Magnetic Susceptibility for Scaling"] << value.mean();
-      if(method=="FTclu"||method=="FTloc"){ value = (ktot2-ktot*ktot-ktot)/N; }// (<ktot^2>-<ktot>^2-<ktot>)/V  for FT method
-      else{                                 value = (energy2-energy*energy)/(T*T*N); }// (<E^2>-<E>^2)/(T*T)/V  for conventional method
-      obs_out["Specific Heat"] << value.mean();
-    }
+    // connected estimation toward the system without randomness makes overestimation of error.
+    alps::RealObsevaluator mabs = obs["|Magnetization|"];
+    alps::RealObsevaluator m2 = obs["Magnetization^2"];
+    alps::RealObsevaluator m4 = obs["Magnetization^4"];
+    alps::RealObsevaluator T = obs["Temperature"];
+    alps::RealObsevaluator N = obs["Number of Sites"];
+    alps::RealObsevaluator ktot = obs["ktot"];
+    alps::RealObsevaluator ktot2 = obs["ktot^2"];
+    alps::RealObsevaluator energy = obs["Energy"];
+    alps::RealObsevaluator energy2 = obs["Energy^2"];
+    
+    if(obs_out.find("<Temperature>")==obs_out.end()){ obs_out << alps::RealObservable("<Temperature>"); } //for proper computation of confidence interval
+    if(obs_out.find("<Number of Sites>")==obs_out.end()){ obs_out << alps::RealObservable("<Number of Sites>"); } //for proper computation of confidence interval
+    if(obs_out.find("<|Magnetization|>")==obs_out.end()){ obs_out << alps::RealObservable("<|Magnetization|>"); }
+    if(obs_out.find("<|Magnetization|>^2")==obs_out.end()){ obs_out << alps::RealObservable("<|Magnetization|>^2"); }
+    if(obs_out.find("<|Magnetization|>^4")==obs_out.end()){ obs_out << alps::RealObservable("<|Magnetization|>^4"); }
+    if(obs_out.find("<Magnetization^2>^2")==obs_out.end()){ obs_out << alps::RealObservable("<Magnetization^2>^2"); }
+    if(obs_out.find("<Magnetization^2>")==obs_out.end()){ obs_out << alps::RealObservable("<Magnetization^2>"); }
+    if(obs_out.find("<Magnetization^4>")==obs_out.end()){ obs_out << alps::RealObservable("<Magnetization^4>"); }
+    if(obs_out.find("Magnetic Susceptibility connected")==obs_out.end()){ obs_out << alps::RealObservable("Magnetic Susceptibility connected"); }
+    if(obs_out.find("Magnetic Susceptibility connected for Scaling")==obs_out.end()){ obs_out << alps::RealObservable("Magnetic Susceptibility connected for Scaling"); }
+    if(obs_out.find("Specific Heat connected")==obs_out.end()){ obs_out << alps::RealObservable("Specific Heat connected"); }
+    
+    alps::RealObsevaluator value("Physical Quantity");
+    value = T;
+    obs_out["<Temperature>"] << value.mean();
+    value = N;
+    obs_out["<Number of Sites>"] << value.mean();
+    value = mabs;
+    obs_out["<|Magnetization|>"] << value.mean();
+    value = mabs*mabs;
+    obs_out["<|Magnetization|>^2"] << value.mean();
+    value = mabs*mabs*mabs*mabs;
+    obs_out["<|Magnetization|>^4"] << value.mean();
+    value = m2*m2;
+    obs_out["<Magnetization^2>^2"] << value.mean();
+    value = m2;
+    obs_out["<Magnetization^2>"] << value.mean();
+    value = m4;
+    obs_out["<Magnetization^4>"] << value.mean();
+    value = (m2-mabs*mabs)/T*N; // (<M^2>-<M>^2)/T/V = (<m^2>-<m>^2)*V^2/T/V = (<m^2>-<m>^2)/T*V 
+    obs_out["Magnetic Susceptibility connected"] << value.mean();
+    value = m2/T*N;
+    //value = m2*N;
+    obs_out["Magnetic Susceptibility connected for Scaling"] << value.mean();
+    if(method=="FTclu"||method=="FTloc"){ value = (ktot2-ktot*ktot-ktot)/N; }// (<ktot^2>-<ktot>^2-<ktot>)/V  for FT method
+    else{                                 value = (energy2-energy*energy)/(T*T*N); }// (<E^2>-<E>^2)/(T*T)/V  for conventional method
+    obs_out["Specific Heat connected"] << value.mean();
     
     obs_out << obs;
-//    std::cout << "kitty on your lap" <<std::endl;
   }
 
 
@@ -638,44 +667,24 @@ public:
     alps::RealObsevaluator ktot2 = obs["ktot^2"];
     alps::RealObsevaluator energy = obs["Energy"];
     alps::RealObsevaluator energy2 = obs["Energy^2"];
-
-    if(randomfield != "on"){
-      alps::RealObsevaluator binder("Binder Ratio of Magnetization");
-      binder = m2*m2 / m4;
-      obs.addObservable(binder);
-      alps::RealObsevaluator magsus("Magnetic Susceptibility");
-      magsus = (m2-mabs*mabs)/T*N; // (<M^2>-<M>^2)/T/V = (<m^2>-<m>^2)*V^2/T/V = (<m^2>-<m>^2)/T*V 
-      obs.addObservable(magsus);
-      alps::RealObsevaluator magsussca("Magnetic Susceptibility for Scaling");
-      magsussca = m2/T*N;
-      obs.addObservable(magsussca);
-      alps::RealObsevaluator specheat("Specific Heat");
-      if(method=="FTclu"||method=="FTloc"){ specheat = (ktot2-ktot*ktot-ktot)/N; }// (<ktot^2>-<ktot>^2-<ktot>)/V  for FT method
-      else{                                 specheat = (energy2-energy*energy)/(T*T*N); }// (<E^2>-<E>^2)/(T*T)/V  for conventional method
-      obs.addObservable(specheat);
-    }
-    else{
-      alps::RealObsevaluator m22 = obs["<Magnetization^2>^2"];
-      alps::RealObsevaluator m4_ = obs["<Magnetization^4>"];
-      alps::RealObsevaluator binder("Binder Ratio of Magnetization");
-      binder = m22 / m4_;
-      obs.addObservable(binder);
-    }
-    alps::RealObsevaluator binder("Binder Ratio of Magnetization disconnected");
+    //for pure system
+    alps::RealObsevaluator binder("Binder Ratio of Magnetization");
     binder = m2*m2 / m4;
     obs.addObservable(binder);
-    alps::RealObsevaluator magsus("Magnetic Susceptibility disconnected");
+    alps::RealObsevaluator binder1("Binder Ratio of Magnetization 1");
+    binder1 = m2 / (mabs*mabs);
+    obs.addObservable(binder1);
+    alps::RealObsevaluator magsus("Magnetic Susceptibility");
     magsus = (m2-mabs*mabs)/T*N; // (<M^2>-<M>^2)/T/V = (<m^2>-<m>^2)*V^2/T/V = (<m^2>-<m>^2)/T*V 
     obs.addObservable(magsus);
-    alps::RealObsevaluator magsussca("Magnetic Susceptibility for Scaling disconnected");
+    alps::RealObsevaluator magsussca("Magnetic Susceptibility for Scaling");
     magsussca = m2/T*N;
+    //magsussca = m2*N;
     obs.addObservable(magsussca);
-    alps::RealObsevaluator specheat("Specific Heat disconnected");
+    alps::RealObsevaluator specheat("Specific Heat");
     if(method=="FTclu"||method=="FTloc"){ specheat = (ktot2-ktot*ktot-ktot)/N; }// (<ktot^2>-<ktot>^2-<ktot>)/V  for FT method
     else{                                 specheat = (energy2-energy*energy)/(T*T*N); }// (<E^2>-<E>^2)/(T*T)/V  for conventional method
     obs.addObservable(specheat);
-
-
     alps::RealObsevaluator energyconv = obs["Energy Conventional"];
     alps::RealObsevaluator energyconv2 = obs["Energy^2 Conventional"];
     alps::RealObsevaluator specheatconv("Specific Heat Conventional");
@@ -685,7 +694,40 @@ public:
     specheatft = (ktot2-ktot*ktot-ktot)/N;// (<ktot^2>-<ktot>^2-<ktot>)/V  for FT method
     obs.addObservable(specheatft);
 
+    //for RFIM
+    alps::RealObsevaluator m2_2 = obs["<Magnetization^2>^2"];
+    alps::RealObsevaluator m2_ = obs["<Magnetization^2>"];
+    alps::RealObsevaluator m4_ = obs["<Magnetization^4>"];
+    alps::RealObsevaluator mabs_ = obs["<|Magnetization|>"];
+    alps::RealObsevaluator mabs_2 = obs["<|Magnetization|>^2"];
+    alps::RealObsevaluator mabs_4 = obs["<|Magnetization|>^4"];
+    alps::RealObsevaluator bindercon("Binder Ratio of Magnetization connected");
+    bindercon = m2_2 / m4_;
+    obs.addObservable(bindercon);
+    alps::RealObsevaluator binderdis("Binder Ratio of Magnetization disconnected");
+    binderdis = mabs_2*mabs_2 / mabs_4;
+    obs.addObservable(binderdis);
+    alps::RealObsevaluator binder1con("Binder Ratio of Magnetization 1 connected");
+    binder1con = m2_ / (mabs_2);
+    obs.addObservable(binder1con);
+    alps::RealObsevaluator binder1dis("Binder Ratio of Magnetization 1 disconnected");
+    binder1dis = mabs_2 / (mabs_*mabs_);
+    obs.addObservable(binder1dis);
+    alps::RealObsevaluator T_ = obs["<Temperature>"];
+    alps::RealObsevaluator N_ = obs["<Number of Sites>"];
+    alps::RealObsevaluator magsusdis("Magnetic Susceptibility disconnected");
+    magsusdis = (mabs_2-mabs_*mabs_)/T_*N_; // ([<|M|>^2]-[<|M|>]^2)/T/V = ([<|m|>^2]-[<|m|>]^2)*V^2/T/V = ([<|m|>^2]-[<|m|>]^2)/T*V 
+    obs.addObservable(magsusdis);
+    alps::RealObsevaluator magsusdissca("Magnetic Susceptibility disconnected for Scaling");
+    magsusdissca = mabs_2/T_*N_;
+    //magsusdissca = mabs_2*N_;
+    obs.addObservable(magsusdissca);
+/*    alps::RealObsevaluator specheatdis("Specific Heat disconnected");
+    if(method=="FTclu"||method=="FTloc"){ specheatdis = (ktot2-ktot*ktot-ktot)/N; }// (<ktot^2>-<ktot>^2-<ktot>)/V  for FT method
+    else{                                 specheatdis = (energy2-energy*energy)/(T*T*N); }// (<E^2>-<E>^2)/(T*T)/V  for conventional method
+    obs.addObservable(specheatdis);*/
 
+    //combined Binders
     alps::RealObsevaluator m6 = obs["Magnetization^6"];
     alps::RealObsevaluator m8 = obs["Magnetization^8"];
     double dev[8] = {0.214002, 0.18885, 0.0938762, 0.262266, 0.257176, 0.276397, 0.162642, 0.221176};

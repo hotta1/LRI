@@ -2,11 +2,13 @@ import subprocess
 import math
 
 #physicalQuantityList = ['binder','magsussca','absM','specheat']
-physicalQuantityList = ['binder','magsussca','absM']
+physicalQuantityList = ['magsussca','absM','specheat']
+#physicalQuantityList = ['binder','magsussca','absM']
+#physicalQuantityList = ['binderdis','magsussca','absM']
 
-Tc = 8.56
+Tc = 8.64
 nuinv = 2.0
-omega = 0.0
+omega = 0.1
 gamma = 3.0
 beta = -0.3
 alpha = 0.1

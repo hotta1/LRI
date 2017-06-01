@@ -38,9 +38,53 @@ public:
     dist = distribution;
   }
 
-  void eigen(double rho_, double normalization_, std::string absolutePATH_, std::string binarymatrixfile){
+  std::vector<std::vector<double> > corAlgebra(double rho_, double normalization_){
     rho = rho_;
     normalization = normalization_;
+    boost::timer::cpu_timer timer;
+    corMatrix.resize(N);
+    for(int i=0 ; i<N ; ++i){ corMatrix[i].resize(N); }
+    //ewald ewaldsum(Lattice->latticeLength, rho);
+    ewald ewaldsum(Lattice->latticeLength, rho,4,4);
+    std::vector<double> origin;
+    origin.resize(Lattice->dim, 0.0);
+    for(int i=0 ; i<Lattice->numVert ; i++){
+      origin = Lattice->coordinate(i);
+      #ifdef _OPENMP
+      #pragma omp parallel for
+      #endif
+      for(int j=0 ; j<N ; j++){
+        if(i==j){
+          corMatrix[i][j] = 1.0;
+        }
+        else{
+          std::vector<double> ci = Lattice->coordinate(j);
+          //corMatrix[i][j] = ewaldsum.ewaldsum(origin,ci);
+          corMatrix[i][j] = ewaldsum.nearest(origin,ci)/(normalization+1.0);
+        }
+        //std::cout <<corMatrix[i][j]<<"  ";
+      }
+      //std::cout << std::endl;
+    }
+    for(int i = Lattice->numVert ; i<N ; ++i){
+      #ifdef _OPENMP
+      #pragma omp parallel for
+      #endif
+      for(int j=0 ; j<N ; j++){
+        int effectivei = i;
+        int effectivej = j;
+        Lattice->shiftRel(effectivei,effectivej);
+        corMatrix[i][j] = corMatrix[effectivei][effectivej];
+      }
+    }
+    std::cout << "Finished creating correlation matrix. It takes " << timer.format() << std::endl;
+    return corMatrix;
+  }
+
+//  void eigen(double rho_, double normalization_, std::string absolutePATH_, std::string binarymatrixfile){
+  void eigen(std::string absolutePATH_, std::string binarymatrixfile){
+//    rho = rho_;
+//    normalization = normalization_;
     absolutePATH = absolutePATH_;
     if(binarymatrixfile=="on"){
       std::string transMatrixFN;
@@ -54,7 +98,7 @@ public:
       std::ifstream transMatrixFile;
       transMatrixFile.open(transMatrixFN.c_str());
       if( !transMatrixFile ){
-        corAlgebra();
+//        corAlgebra();
         calcEigenTrans();
         alps::OXDRFileDump odump(transMatrixFN);
         odump << transMatrix;
@@ -68,7 +112,7 @@ public:
       std::cout << "loading " << transMatrixFN <<std::endl;
     }
     else{
-      corAlgebra();
+//      corAlgebra();
       calcEigenTrans();
     }
     return;
@@ -80,10 +124,17 @@ public:
     return;
   }
 
-  std::string EValueChecker(double rho_, double normalization_){
-    rho = rho_;
-    normalization = normalization_;
-    corAlgebra();
+  void ipTransMatrix(std::vector<std::vector<double> > transMatrix_){
+    transMatrix = transMatrix_;
+    return;
+  }
+
+
+//  std::string EValueChecker(double rho_, double normalization_){
+  std::string EValueChecker(){
+//    rho = rho_;
+//    normalization = normalization_;
+//    corAlgebra();
     boost::timer::cpu_timer timer;
     std::cout << "conducting eigenvalue decomposition and checking minimum eigen value" <<std::endl;
     std::vector<std::vector<double> > EVector;
@@ -92,6 +143,7 @@ public:
     #pragma omp parallel for
     #endif
     for(int i=0; i<N ; ++i){ EVector[i].resize(N); }
+    std::vector<double> EValue;
     EValue.resize(N);
     
     dsyev(corMatrix, EVector, EValue);
@@ -107,11 +159,11 @@ public:
   }
 
 
-  void cholesky(double rho_, double normalization_, std::string absolutePATH_, std::string binarymatrixfile){
+//  void cholesky(double rho_, double normalization_, std::string absolutePATH_, std::string binarymatrixfile){
+  void cholesky(std::string absolutePATH_, std::string binarymatrixfile){
     absolutePATH = absolutePATH_;
-    rho = rho_;
-    normalization = normalization_;
-    normalization = normalization_;
+//    rho = rho_;
+//    normalization = normalization_;
     if(binarymatrixfile=="on"){
       std::string transMatrixFN;
       transMatrixFN = transMatrixFilename("CHOLESKY");
@@ -124,7 +176,7 @@ public:
       std::ifstream transMatrixFile;
       transMatrixFile.open(transMatrixFN.c_str());
       if( !transMatrixFile ){
-        corAlgebra();
+//        corAlgebra();
         calcCholeskyTrans();
         alps::OXDRFileDump odump(transMatrixFN);
         odump << transMatrix;
@@ -138,7 +190,7 @@ public:
       std::cout << "loading " << transMatrixFN <<std::endl;
     }
     else{
-      corAlgebra();
+//      corAlgebra();
       calcCholeskyTrans();
     }
     return;
@@ -185,6 +237,15 @@ public:
 
   double get_rho() const {return rho;}
   double get_normalization() const {return normalization;}
+  double get_corAlgebraElement(double rho, double normalization_, int x, int y) const {
+    if(x==y){ return 1.0; }
+    ewald ewaldsum(Lattice->latticeLength, rho, 4, 4);
+    std::vector<double> coordx = Lattice->coordinate(x);
+    std::vector<double> coordy = Lattice->coordinate(y);
+    return ewaldsum.nearest(coordx, coordy)/(normalization_+1.0);
+  }
+  std::vector<std::vector<double> > get_corMatrix() const{ return corMatrix; }
+
 
 protected:
   double rho;
@@ -195,49 +256,7 @@ protected:
   boost::mt19937 mt2;
   randomDistribution dist;
   std::vector<std::vector<double> > transMatrix;
-  std::vector<double> EValue;
   double normalization;
-
-  std::vector<std::vector<double> > corAlgebra(){
-    boost::timer::cpu_timer timer;
-    corMatrix.resize(N);
-    for(int i=0 ; i<N ; ++i){ corMatrix[i].resize(N); }
-    //ewald ewaldsum(Lattice->latticeLength, rho);
-    ewald ewaldsum(Lattice->latticeLength, rho,4,4);
-    std::vector<double> origin;
-    origin.resize(Lattice->dim, 0.0);
-    for(int i=0 ; i<Lattice->numVert ; i++){
-      origin = Lattice->coordinate(i);
-      #ifdef _OPENMP
-      #pragma omp parallel for
-      #endif
-      for(int j=0 ; j<N ; j++){
-        if(i==j){
-          corMatrix[i][j] = 1.0;
-        }
-        else{
-          std::vector<double> ci = Lattice->coordinate(j);
-          //corMatrix[i][j] = ewaldsum.ewaldsum(origin,ci);
-          corMatrix[i][j] = ewaldsum.nearest(origin,ci)/(normalization+1.0);
-        }
-        //std::cout <<corMatrix[i][j]<<"  ";
-      }
-      //std::cout << std::endl;
-    }
-    for(int i = Lattice->numVert ; i<N ; ++i){
-      #ifdef _OPENMP
-      #pragma omp parallel for
-      #endif
-      for(int j=0 ; j<N ; j++){
-        int effectivei = i;
-        int effectivej = j;
-        Lattice->shiftRel(effectivei,effectivej);
-        corMatrix[i][j] = corMatrix[effectivei][effectivej];
-      }
-    }
-    std::cout << "Finished creating correlation matrix. It takes " << timer.format() << std::endl;
-    return corMatrix;
-  }
 
   std::vector<std::vector<double> > calcEigenTrans(){
     boost::timer::cpu_timer timer;
@@ -245,6 +264,7 @@ protected:
     std::vector<std::vector<double> > EVector;
     EVector.resize(N);
     for(int i=0; i<N ; ++i){ EVector[i].resize(N); }
+    std::vector<double> EValue;
     EValue.resize(N);
     
     dsyev(corMatrix, EVector, EValue);

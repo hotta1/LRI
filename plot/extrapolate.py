@@ -40,13 +40,13 @@ def separate(fname):
   return opList
 
 def KHrun(fname, physicalQuantity):
-  Tc = 8.78
-  nuinv = 2.5
-  gamma = 2.5
-  alpha = 1.0
-  beta = -1.0
+  Tc = 8.0
+  nuinv = 2.0
+  gamma = 3.0
+  alpha = 0.1
+  beta = -0.3
   zero = 0.0
-  omega = 1.0
+  omega = 0.1
   if fname == physicalQuantity:
     KHop = open(fname+".op",'w')
     KHop2 = open(fname+"_correction.op",'w')
@@ -59,7 +59,8 @@ def KHrun(fname, physicalQuantity):
     elif physicalQuantity=='absM':
       subprocess.call(["/home/hotta/command/KenjiHarada-BSA-eb06870/CC2/new_bfss", "-c", fname+'.dat', "1", str(Tc), "1", str(nuinv), "1", str(beta)], stdout = KHop)
       subprocess.call(["/home/hotta/command/KenjiHarada-BSA-eb06870/CC2/new_bfss", "-f", "1", "-c", fname+'.dat', "1", str(Tc), "1", str(nuinv), "1", str(omega), "1", str(beta)], stdout = KHop2)
-    elif physicalQuantity=='binder':
+    #elif physicalQuantity=='binder':
+    elif physicalQuantity=='binder' or physicalQuantity=='binderdis':
       subprocess.call(["/home/hotta/command/KenjiHarada-BSA-eb06870/CC2/new_bfss", "-c", fname+'.dat', "1", str(Tc), "1", str(nuinv), "0", str(zero)], stdout = KHop)
       subprocess.call(["/home/hotta/command/KenjiHarada-BSA-eb06870/CC2/new_bfss", "-f", "1", "-c", fname+'.dat', "1", str(Tc), "1", str(nuinv), "1", str(omega), "0", str(zero)], stdout = KHop2)
     else:
@@ -75,7 +76,8 @@ def KHrun(fname, physicalQuantity):
       subprocess.call(["/home/hotta/command/KenjiHarada-BSA-eb06870/CC2/new_bfss", "-c", fname+'.dat', "1", str(Tc), "1", str(nuinv), "1", str(alpha)], stdout = KHop)
     elif physicalQuantity=='absM':
       subprocess.call(["/home/hotta/command/KenjiHarada-BSA-eb06870/CC2/new_bfss", "-c", fname+'.dat', "1", str(Tc), "1", str(nuinv), "1", str(beta)], stdout = KHop)
-    elif physicalQuantity=='binder':
+    #elif physicalQuantity=='binder':
+    elif physicalQuantity=='binder' or physicalQuantity=='binderdis':
       subprocess.call(["/home/hotta/command/KenjiHarada-BSA-eb06870/CC2/new_bfss", "-c", fname+'.dat', "1", str(Tc), "1", str(nuinv), "0", str(zero)], stdout = KHop)
     else:
       subprocess.call(["/home/hotta/command/KenjiHarada-BSA-eb06870/CC2/new_bfss", "-c", fname+'.dat', "1", str(Tc), "1", str(nuinv), "1", str(zero)], stdout = KHop)
@@ -85,7 +87,10 @@ def KHrun(fname, physicalQuantity):
 
 
 
-physicalQuantityList = ['binder','magsussca','specheat','absM']
+#physicalQuantityList = ['binder','bindercon','binderdis','magsussca','specheat','absM']
+#physicalQuantityList = ['binder','magsussca','specheat','absM']
+#physicalQuantityList = ['magsussca','specheat','absM']
+physicalQuantityList = ['binderdis','magsussca','specheat','absM']
 #physicalQuantityList = ['binder','magsus']
 #physicalQuantityList = ['binder','magsus','absM','M^2']
 #physicalQuantityList = ['specheatsca','specheat','absM']
